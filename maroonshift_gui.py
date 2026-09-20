@@ -11,8 +11,9 @@
 #
 
 import argparse
-import os
+import configparser
 import math
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +24,9 @@ from pathlib import Path
 __version__ = "1.0.0"
 
 APP_NAME = "Maroon Shift"
+
+DEFAULT_TEMP = 6500
+DEFAULT_GAMMA = 1.0
 
 # Default redshift path; we also search PATH for it so the script works
 # regardless of where the package was installed by the distro.
@@ -132,6 +136,46 @@ def apply(temp, gamma):
 def reset_screen():
     """Reset the screen to normal (clear gamma ramps)."""
     return redshift(["-x"])
+
+
+# ---------------------------------------------------------------------------
+# settings persistence
+# ---------------------------------------------------------------------------
+
+def _config_path():
+    """Return the path to the user settings INI file."""
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return base / "maroonshift-gui" / "config.ini"
+
+
+def load_settings():
+    """Return (temperature, gamma) from disk, falling back to defaults."""
+    cfg = configparser.ConfigParser()
+    try:
+        cfg.read(_config_path())
+        temp = int(cfg.get("Settings", "temperature", fallback=str(DEFAULT_TEMP)))
+        gamma = float(cfg.get("Settings", "gamma", fallback=str(DEFAULT_GAMMA)))
+    except (OSError, ValueError, configparser.Error):
+        return DEFAULT_TEMP, DEFAULT_GAMMA
+    temp = _clamp(temp, 1000, 12000)
+    gamma = round(_clamp(gamma, 0.2, 2.0), 2)
+    return temp, gamma
+
+
+def save_settings(temp, gamma):
+    """Persist temperature and gamma to disk, silently ignoring errors."""
+    try:
+        path = _config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = configparser.ConfigParser()
+        cfg["Settings"] = {
+            "temperature": str(int(temp)),
+            "gamma": f"{float(gamma):.2f}",
+        }
+        with open(path, "w") as fh:
+            cfg.write(fh)
+    except (OSError, ValueError):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -321,8 +365,9 @@ def main():
     root.title(APP_NAME)
     root.resizable(False, False)
 
-    temp_var = tk.IntVar(value=6500)
-    gamma_var = tk.DoubleVar(value=1.0)
+    start_temp, start_gamma = load_settings()
+    temp_var = tk.IntVar(value=start_temp)
+    gamma_var = tk.DoubleVar(value=start_gamma)
 
     style = ttk.Style(root)
     try:
@@ -371,15 +416,19 @@ def main():
     def _on_change(_=None):
         _update_preview()
 
-    def _apply_on_release(_=None):
+    def _do_apply():
         _update_preview()
         temp = temp_var.get()
         gamma = round(gamma_var.get(), 2)
         ok = apply(temp, gamma)
         if ok == 0:
+            save_settings(temp, gamma)
             status.config(text=f"Applied: redshift -P -O {temp} -g {gamma:.2f}")
         else:
             status.config(text="Apply failed (is redshift available?)")
+
+    def _apply_on_release(_=None):
+        _do_apply()
 
     temp_scale.configure(command=_on_change)
     gamma_scale.configure(command=_on_change)
@@ -388,8 +437,9 @@ def main():
 
     def _reset():
         reset_screen()
-        temp_var.set(6500)
-        gamma_var.set(1.0)
+        temp_var.set(DEFAULT_TEMP)
+        gamma_var.set(DEFAULT_GAMMA)
+        save_settings(DEFAULT_TEMP, DEFAULT_GAMMA)
         _update_preview()
         status.config(
             text="Screen reset to normal (6500K, gamma 1.00)"
@@ -482,6 +532,7 @@ def main():
         )
 
     _apply_theme(root)
+    _do_apply()  # restore last applied settings
     root.mainloop()
     _LOCK.unlink(missing_ok=True)
 
