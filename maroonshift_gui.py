@@ -247,15 +247,17 @@ def _panel_plugin_ids(panel):
     try:
         out = subprocess.check_output(
             ["xfconf-query", "-c", "xfce4-panel", "-p",
-             f"/panels/panel-{panel}/plugin-ids", "-lv"],
+             f"/panels/panel-{panel}/plugin-ids"],
             stderr=subprocess.DEVNULL,
         ).decode()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return []
-    m = re.search(r"\[([^\]]*)\]", out)
-    if not m:
+    # Plain output is "Value is an array with N items:\n<id> <id> ...".
+    # (`-lv` would give "<<UNSUPPORTED>>" for multi-element arrays, which is
+    # why it is not used.)
+    if ":" not in out:
         return []
-    return [int(x) for x in m.group(1).split(",") if x.strip()]
+    return [int(x) for x in out.split(":", 1)[1].split() if x.strip().isdigit()]
 
 
 def _panel_numbers():
