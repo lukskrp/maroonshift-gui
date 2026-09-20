@@ -258,8 +258,26 @@ def _panel_plugin_ids(panel):
     return [int(x) for x in m.group(1).split(",") if x.strip()]
 
 
-def add_to_panel(panel=2, status_cb=None):
-    """Add a Launcher plugin pointing at this app to the given panel."""
+def _panel_numbers():
+    """Return the numbers of every panel configured in xfce4-panel."""
+    try:
+        out = subprocess.check_output(
+            ["xfconf-query", "-c", "xfce4-panel", "-l"],
+            stderr=subprocess.DEVNULL,
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    return sorted({
+        int(m) for m in re.findall(r"/panels/panel-(\d+)/plugin-ids", out)
+    })
+
+
+def add_to_panel(panel=None, status_cb=None):
+    """Add a Launcher plugin pointing at this app to the given panel.
+
+    If ``panel`` is None the first configured panel is used, so the launcher
+    always lands on a panel that actually exists.
+    """
     def _status(msg):
         if status_cb:
             status_cb(msg)
@@ -272,6 +290,10 @@ def add_to_panel(panel=2, status_cb=None):
     except subprocess.CalledProcessError:
         _status("xfconf-query not found")
         return False
+
+    if panel is None:
+        panels = _panel_numbers()
+        panel = panels[0] if panels else 1
 
     # Try the installed path first, fall back to running the Python file
     # directly from its source location (useful during development).
